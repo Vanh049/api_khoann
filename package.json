@@ -1,0 +1,19 @@
+{
+  "name": "api_khoann",
+  "version": "1.0.0",
+  "description": "API nhận và hiển thị dữ liệu phân mảnh Khoa_NN",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": ["api", "khoa_nn", "nodejs", "express"],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "body-parser": "^2.2.0",
+    "cors": "^2.8.5",
+    "express": "^5.1.0"
+  }
+}
