@@ -47,8 +47,8 @@ app.get('/api/khoa_nn', (req, res) => {
   res.json(data.sinhvien);
 });
 
-// Khởi động server
-const PORT = 5000;
-app.listen(PORT, '0.0.0.0', () => {
+// Khởi động server, dùng PORT do Render cấp
+const PORT = process.env.PORT || 5000; // Dùng port do Render cấp, fallback 5000 nếu chạy local
+app.listen(PORT, () => {
   console.log(`API Khoa_NN chạy tại cổng ${PORT}`);
 });
