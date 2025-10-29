@@ -1,8 +1,10 @@
 const express = require('express');
 const fs = require('fs');
+const cors = require('cors');
+
 const app = express();
 app.use(express.json());
-app.use(require('cors')());
+app.use(cors());
 
 // =============================
 // DỮ LIỆU PHÂN MẢNH KHOA_NN
@@ -10,7 +12,14 @@ app.use(require('cors')());
 const FILE = 'data_khoann.json';
 
 // Nếu chưa có file thì tạo rỗng
-if (!fs.existsSync(FILE)) fs.writeFileSync(FILE, JSON.stringify({ sinhvien: [] }, null, 2));
+if (!fs.existsSync(FILE)) {
+  fs.writeFileSync(FILE, JSON.stringify({ sinhvien: [] }, null, 2));
+}
+
+// Route kiểm tra server
+app.get('/', (req, res) => {
+  res.send('API Khoa_NN is running!');
+});
 
 // API nhận dữ liệu phân mảnh (từ máy chủ gửi xuống)
 app.post('/api/khoa_nn', (req, res) => {
@@ -40,4 +49,6 @@ app.get('/api/khoa_nn', (req, res) => {
 
 // Khởi động server
 const PORT = 5000;
-app.listen(PORT, '0.0.0.0', () => console.log(`API Khoa_NN chạy tại cổng ${PORT}`));
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`API Khoa_NN chạy tại cổng ${PORT}`);
+});
