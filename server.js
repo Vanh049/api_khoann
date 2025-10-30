@@ -66,8 +66,7 @@ app.get("/api/khoa_nn", (req, res) => {
   }
 });
 
-// Khởi động server
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 10000; // vẫn fallback 10000 nếu chạy local
 app.listen(PORT, () => {
-  console.log(`🚀 API Khoa_NN chạy tại cổng ${PORT}`);
+  console.log(`🚀 API Khoa_NN đang chạy tại cổng ${PORT}`);
 });
