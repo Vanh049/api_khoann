@@ -1,105 +1,73 @@
-// =============================
-// 🔹 API PHÂN MẢNH KHOA_NN (Site 2 - Render)
-// =============================
-
 const express = require("express");
 const fs = require("fs");
 const cors = require("cors");
-const path = require("path");
 
 const app = express();
 app.use(express.json());
 app.use(cors());
 
 // =============================
-// 🔧 CẤU HÌNH FILE LƯU DỮ LIỆU
+// DỮ LIỆU PHÂN MẢNH KHOA_NN
 // =============================
-// Trên Render, chỉ thư mục `/tmp` được ghi
-// Nếu chạy local, dùng file cùng thư mục
-const FILE =
-  process.env.RENDER === "true"
-    ? "/tmp/data_khoann.json"
-    : path.join(__dirname, "data_khoann.json");
 
-// Nếu chưa có file thì tạo trống
+// ✅ Render không cho ghi ngoài /tmp, nên phải lưu ở đây
+const FILE = "/tmp/data_khoann.json";
+
+// Nếu chưa có file thì tạo rỗng
 if (!fs.existsSync(FILE)) {
-  fs.writeFileSync(
-    FILE,
-    JSON.stringify({ sinhvien: [], lop: [], dangky: [] }, null, 2)
-  );
-  console.log("📁 Đã tạo file dữ liệu mới:", FILE);
+  fs.writeFileSync(FILE, JSON.stringify({ sinhvien: [] }, null, 2));
+  console.log("📁 Tạo file trống ban đầu tại", FILE);
 }
 
-// =============================
-// 🩵 ROUTES
-// =============================
-
-// Kiểm tra server
+// Route kiểm tra server
 app.get("/", (req, res) => {
-  res.send("✅ API Khoa_NN is running!");
+  res.send("✅ API Khoa_NN is running on Render!");
 });
 
-// Nhận dữ liệu từ Site 1
+// API nhận dữ liệu phân mảnh (từ máy chủ gửi xuống)
 app.post("/api/khoa_nn", (req, res) => {
-  console.log("📥 Nhận dữ liệu từ máy chủ...");
-
   try {
-    const input = req.body; // JSON có nhiều bảng (lop, sinhvien, dangky)
-    const current = JSON.parse(fs.readFileSync(FILE, "utf8"));
+    console.log("📥 Nhận dữ liệu từ client...");
+    const newData = req.body.sinhvien || req.body || [];
+    const current = fs.existsSync(FILE)
+      ? JSON.parse(fs.readFileSync(FILE, "utf8")).sinhvien || []
+      : [];
 
-    // Duyệt qua từng bảng
-    Object.keys(input).forEach((table) => {
-      const newRows = input[table] || [];
-      const oldRows = current[table] || [];
-
-      let updated = [...oldRows];
-      newRows.forEach((row) => {
-        let idx = -1;
-        if (table === "lop") idx = oldRows.findIndex((x) => x.MaLop === row.MaLop);
-        else if (table === "sinhvien")
-          idx = oldRows.findIndex((x) => x.MaSV === row.MaSV);
-        else if (table === "dangky")
-          idx = oldRows.findIndex(
-            (x) => x.MaSV === row.MaSV && x.MaMH === row.MaMH
-          );
-
-        if (idx >= 0) updated[idx] = row;
-        else updated.push(row);
-      });
-
-      current[table] = updated;
+    // UPSERT: thêm mới hoặc cập nhật nếu đã tồn tại
+    newData.forEach((sv) => {
+      const idx = current.findIndex((x) => x.MaSV === sv.MaSV);
+      if (idx >= 0) current[idx] = sv;
+      else current.push(sv);
     });
 
     // Ghi lại file
-    fs.writeFileSync(FILE, JSON.stringify(current, null, 2));
-    console.log("✅ Đã ghi dữ liệu vào:", FILE);
+    fs.writeFileSync(FILE, JSON.stringify({ sinhvien: current }, null, 2));
+    console.log(`✅ Đã cập nhật ${newData.length} sinh viên.`);
 
     res.json({
-      message: "Đã nhận và cập nhật dữ liệu thành công!",
-      tables: Object.keys(input),
+      message: "Đã nhận dữ liệu Khoa_NN",
+      count: newData.length,
     });
   } catch (err) {
-    console.error("❌ Lỗi xử lý dữ liệu:", err);
+    console.error("❌ Lỗi khi xử lý dữ liệu:", err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// Xem toàn bộ dữ liệu hiện có
+// API xem dữ liệu hiện tại
 app.get("/api/khoa_nn", (req, res) => {
   try {
-    const data = JSON.parse(fs.readFileSync(FILE, "utf8"));
-    res.json(data);
+    const data = fs.existsSync(FILE)
+      ? JSON.parse(fs.readFileSync(FILE, "utf8"))
+      : { sinhvien: [] };
+    res.json(data.sinhvien);
   } catch (err) {
-    console.error("❌ Lỗi đọc file:", err);
-    res.status(500).json({ error: "Không thể đọc dữ liệu." });
+    res.status(500).json({ error: err.message });
   }
 });
 
-// =============================
-// 🚀 KHỞI ĐỘNG SERVER
-// =============================
+// Khởi động server
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
-  console.log(`🚀 API Khoa_NN đang chạy tại cổng ${PORT}`);
-  console.log(`📂 File dữ liệu: ${FILE}`);
+  console.log(`🚀 API Khoa_NN chạy tại cổng ${PORT}`);
 });
