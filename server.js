@@ -9,18 +9,30 @@ const app = express();
 app.use(express.json({ limit: '10mb' }));
 app.use(cors());
 
+// ------------------ CONFIG ------------------
 const DB_FILE = './data/site3.db';
+const LOG_FILE = './data/log.txt';
 const PORT = process.env.PORT || 5000;
 
-// 🟢 Link API Site 1 để đồng bộ ngược (sửa lại đúng domain của bạn)
+// ✅ API Site 1 để sync ngược
 const SITE1_SYNC_URL = 'https://project05-global.somee.com/api/sync/from_khoann';
 
-// ======================= KHỞI TẠO DATABASE =======================
+// ------------------ PREPARE FOLDERS ------------------
 if (!fs.existsSync('./data')) fs.mkdirSync('./data', { recursive: true });
+if (!fs.existsSync('./data/site3.db')) fs.writeFileSync(DB_FILE, '');
+if (!fs.existsSync(LOG_FILE)) fs.writeFileSync(LOG_FILE, '');
 
+// ✅ Log ra file để debug Render
+function writeLog(msg) {
+  const data = `[${new Date().toLocaleString()}] ${msg}\n`;
+  fs.appendFileSync(LOG_FILE, data);
+  console.log(msg);
+}
+
+// ------------------ INIT SQLITE ------------------
 const db = new sqlite3.Database(DB_FILE, (err) => {
-  if (err) return console.error('Không thể mở DB:', err);
-  console.log('✅ SQLite DB opened:', DB_FILE);
+  if (err) return writeLog('❌ Không thể mở DB: ' + err);
+  writeLog('✅ SQLite DB opened: ' + DB_FILE);
 });
 
 db.serialize(() => {
@@ -50,7 +62,7 @@ db.serialize(() => {
   )`);
 });
 
-// ======================= CÁC HÀM CẬP NHẬT =======================
+// ------------------ UPSERT FUNCTIONS ------------------
 function upsertLop(rows) {
   return new Promise((resolve, reject) => {
     if (!Array.isArray(rows) || rows.length === 0) return resolve();
@@ -85,65 +97,64 @@ function upsertDangKy(rows) {
   });
 }
 
-// ======================= HÀM ĐỒNG BỘ NGƯỢC VỀ SITE 1 =======================
+// ------------------ SYNC TO SITE 1 ------------------
 async function syncToSite1() {
   try {
     const result = {};
     db.serialize(() => {
       db.all('SELECT * FROM Lop', (e1, lop) => {
-        if (e1) return console.error(e1);
+        if (e1) return writeLog(e1);
         result.lop = lop;
         db.all('SELECT * FROM SinhVien', (e2, sv) => {
-          if (e2) return console.error(e2);
+          if (e2) return writeLog(e2);
           result.sinhvien = sv;
           db.all('SELECT * FROM DangKy', async (e3, dk) => {
-            if (e3) return console.error(e3);
+            if (e3) return writeLog(e3);
             result.dangky = dk;
 
             try {
               const res = await axios.post(SITE1_SYNC_URL, result);
-              console.log(`🔁 Đồng bộ ngược thành công: ${res.status} ${res.statusText}`);
+              writeLog(`🔁 Sync lên Site1 OK: ${res.status}`);
             } catch (err) {
-              console.error('⚠️ Lỗi khi đồng bộ ngược về Site 1:', err.message);
+              writeLog(`⚠️ Sync lỗi: ${err.message}`);
             }
           });
         });
       });
     });
   } catch (err) {
-    console.error('❌ Lỗi đồng bộ ngược:', err.message);
+    writeLog('❌ Lỗi sync: ' + err.message);
   }
 }
 
-// ======================= API CHÍNH =======================
-
-// Nhận dữ liệu từ Site 1 (đẩy xuống)
+// ------------------ API ------------------
 app.post('/api/khoa_nn', async (req, res) => {
   try {
     const input = req.body || {};
     await upsertLop(input.lop || []);
     await upsertSinhVien(input.sinhvien || []);
     await upsertDangKy(input.dangky || []);
-    res.json({ message: '✅ Đã lưu dữ liệu vào SQLite trên Site 3.' });
+    writeLog("✅ Nhận & lưu dữ liệu từ Site1");
+    res.json({ message: '✅ Đã lưu dữ liệu vào Site3' });
   } catch (err) {
-    console.error('POST /api/khoa_nn error', err);
+    writeLog(`❌ /api/khoa_nn: ${err.message}`);
     res.status(500).json({ error: err.message });
   }
 });
 
-// Cung cấp dữ liệu cho GET
+// GET xem data
 app.get('/api/khoa_nn', (req, res) => {
   const result = {};
   db.serialize(() => {
     db.all('SELECT * FROM Lop', (e1, rows1) => {
       if (e1) return res.status(500).json({ error: e1.message });
-      result.lop = rows1 || [];
+      result.lop = rows1;
       db.all('SELECT * FROM SinhVien', (e2, rows2) => {
         if (e2) return res.status(500).json({ error: e2.message });
-        result.sinhvien = rows2 || [];
+        result.sinhvien = rows2;
         db.all('SELECT * FROM DangKy', (e3, rows3) => {
           if (e3) return res.status(500).json({ error: e3.message });
-          result.dangky = rows3 || [];
+          result.dangky = rows3;
           res.json(result);
         });
       });
@@ -151,12 +162,24 @@ app.get('/api/khoa_nn', (req, res) => {
   });
 });
 
-// ======================= LỊCH ĐỒNG BỘ TỰ ĐỘNG =======================
-// Chạy mỗi 5 phút: gửi dữ liệu SQLite ngược về Site 1
+// ✅ API ping test
+app.get('/api/ping', (req, res) => res.send("✅ Site3 OK"));
+
+// ✅ API status
+app.get('/api/status', (req, res) => {
+  const size = fs.statSync(DB_FILE).size;
+  res.json({
+    status: "running",
+    db_file: DB_FILE,
+    db_size_bytes: size
+  });
+});
+
+// ------------------ AUTO SYNC EVERY 5 MIN ------------------
 cron.schedule('*/5 * * * *', () => {
-  console.log('⏰ Bắt đầu đồng bộ ngược về Site 1...');
+  writeLog("⏰ Sync lên Site1...");
   syncToSite1();
 });
 
-// ======================= KHỞI ĐỘNG SERVER =======================
-app.listen(PORT, () => console.log(`🚀 API Khoa_NN chạy tại cổng ${PORT}`));
+// ------------------ START SERVER ------------------
+app.listen(PORT, () => writeLog(`🚀 Site3 chạy tại port ${PORT}`));
