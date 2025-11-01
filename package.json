@@ -4,8 +4,9 @@
   "description": "API nhận và hiển thị dữ liệu phân mảnh Khoa_NN",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "preinstall": "rm -rf node_modules/sqlite3",
+    "postinstall": "npm rebuild sqlite3 --build-from-source",
+    "start": "node server.js"
   },
   "keywords": [
     "api",
@@ -23,5 +24,8 @@
     "express": "^5.1.0",
     "node-cron": "^4.2.1",
     "sqlite3": "^5.1.7"
+  },
+  "devDependencies": {
+    "node-gyp": "^11.5.0"
   }
 }
