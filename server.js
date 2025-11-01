@@ -12,17 +12,17 @@ app.use(cors());
 // ------------------ CONFIG ------------------
 const DB_FILE = './data/site3.db';
 const LOG_FILE = './data/log.txt';
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 10000;
 
-// ✅ API Site 1 để sync ngược
-const SITE1_SYNC_URL = 'https://project05-global.somee.com/api/sync/from_khoann';
+// ✅ API Site 1 (SQL Server) để sync 2 chiều
+const SITE1_SEND_URL = 'https://project05-global.somee.com/api/sync/to_khoann';
+const SITE1_RECV_URL = 'https://project05-global.somee.com/api/sync/from_khoann';
 
 // ------------------ PREPARE FOLDERS ------------------
 if (!fs.existsSync('./data')) fs.mkdirSync('./data', { recursive: true });
-if (!fs.existsSync('./data/site3.db')) fs.writeFileSync(DB_FILE, '');
+if (!fs.existsSync(DB_FILE)) fs.writeFileSync(DB_FILE, '');
 if (!fs.existsSync(LOG_FILE)) fs.writeFileSync(LOG_FILE, '');
 
-// ✅ Log ra file để debug Render
 function writeLog(msg) {
   const data = `[${new Date().toLocaleString()}] ${msg}\n`;
   fs.appendFileSync(LOG_FILE, data);
@@ -31,8 +31,8 @@ function writeLog(msg) {
 
 // ------------------ INIT SQLITE ------------------
 const db = new sqlite3.Database(DB_FILE, (err) => {
-  if (err) return writeLog('❌ Không thể mở DB: ' + err);
-  writeLog('✅ SQLite DB opened: ' + DB_FILE);
+  if (err) return writeLog('❌ DB lỗi: ' + err);
+  writeLog('✅ DB Site3 opened');
 });
 
 db.serialize(() => {
@@ -49,6 +49,7 @@ db.serialize(() => {
     NgaySinh TEXT,
     MaLop TEXT,
     HocBong REAL,
+    Khoa TEXT,
     LastModified INTEGER
   )`);
 
@@ -58,128 +59,100 @@ db.serialize(() => {
     Diem1 REAL,
     Diem2 REAL,
     Diem3 REAL,
+    LastModified INTEGER,
     PRIMARY KEY (MaSV, MaMon)
   )`);
 });
 
 // ------------------ UPSERT FUNCTIONS ------------------
 function upsertLop(rows) {
-  return new Promise((resolve, reject) => {
-    if (!Array.isArray(rows) || rows.length === 0) return resolve();
-    const stmt = db.prepare(`INSERT OR REPLACE INTO Lop VALUES (?, ?, ?)`);
-    db.serialize(() => {
-      rows.forEach(r => stmt.run(r.MaLop, r.TenLop, r.Khoa));
-      stmt.finalize(err => err ? reject(err) : resolve());
-    });
+  return new Promise((resolve) => {
+    if (!rows.length) return resolve();
+    const stmt = db.prepare(
+      `INSERT OR REPLACE INTO Lop (MaLop,TenLop,Khoa) VALUES (?,?,?)`
+    );
+    rows.forEach(r => stmt.run(r.MaLop, r.TenLop, "NN"));
+    stmt.finalize(resolve);
   });
 }
 
 function upsertSinhVien(rows) {
-  return new Promise((resolve, reject) => {
-    if (!Array.isArray(rows) || rows.length === 0) return resolve();
-    const stmt = db.prepare(`INSERT OR REPLACE INTO SinhVien VALUES (?, ?, ?, ?, ?, ?, ?)`);
+  return new Promise((resolve) => {
+    if (!rows.length) return resolve();
+    const stmt = db.prepare(
+      `INSERT OR REPLACE INTO SinhVien VALUES (?,?,?,?,?,?,?,?)`
+    );
     const now = Date.now();
-    db.serialize(() => {
-      rows.forEach(r => stmt.run(r.MaSV, r.HoTen, r.Phai, r.NgaySinh, r.MaLop, r.HocBong, now));
-      stmt.finalize(err => err ? reject(err) : resolve());
-    });
+    rows.forEach(r => stmt.run(r.MaSV, r.HoTen, r.Phai, r.NgaySinh, r.MaLop, r.HocBong, "NN", now));
+    stmt.finalize(resolve);
   });
 }
 
 function upsertDangKy(rows) {
-  return new Promise((resolve, reject) => {
-    if (!Array.isArray(rows) || rows.length === 0) return resolve();
-    const stmt = db.prepare(`INSERT OR REPLACE INTO DangKy VALUES (?, ?, ?, ?, ?)`);
-    db.serialize(() => {
-      rows.forEach(r => stmt.run(r.MaSV, r.MaMon, r.Diem1, r.Diem2, r.Diem3));
-      stmt.finalize(err => err ? reject(err) : resolve());
+  return new Promise(resolve => {
+    if (!rows.length) return resolve();
+    const stmt = db.prepare(
+      `INSERT OR REPLACE INTO DangKy VALUES (?,?,?,?,?,?)`
+    );
+    const now = Date.now();
+    rows.forEach(r => stmt.run(r.MaSV, r.MaMon, r.Diem1, r.Diem2, r.Diem3, now));
+    stmt.finalize(resolve);
+  });
+}
+
+// ------------------ SYNC TO SITE1 ------------------
+async function syncToSite1() {
+  db.all(`SELECT * FROM Lop`, (_, lop) => {
+    db.all(`SELECT * FROM SinhVien WHERE Khoa = 'NN'`, (_, sv) => {
+      db.all(`SELECT * FROM DangKy`, async (_, dk) => {
+        const payload = { lop, sinhvien: sv, dangky: dk };
+
+        try {
+          await axios.post(SITE1_RECV_URL, payload);
+          writeLog(`🔁 Gửi data NN -> SQL Server OK`);
+        } catch (e) {
+          writeLog(`⚠️ Sync lên Site1 lỗi: ${e.message}`);
+        }
+      });
     });
   });
 }
 
-// ------------------ SYNC TO SITE 1 ------------------
-async function syncToSite1() {
-  try {
-    const result = {};
-    db.serialize(() => {
-      db.all('SELECT * FROM Lop', (e1, lop) => {
-        if (e1) return writeLog(e1);
-        result.lop = lop;
-        db.all('SELECT * FROM SinhVien', (e2, sv) => {
-          if (e2) return writeLog(e2);
-          result.sinhvien = sv;
-          db.all('SELECT * FROM DangKy', async (e3, dk) => {
-            if (e3) return writeLog(e3);
-            result.dangky = dk;
-
-            try {
-              const res = await axios.post(SITE1_SYNC_URL, result);
-              writeLog(`🔁 Sync lên Site1 OK: ${res.status}`);
-            } catch (err) {
-              writeLog(`⚠️ Sync lỗi: ${err.message}`);
-            }
-          });
-        });
-      });
-    });
-  } catch (err) {
-    writeLog('❌ Lỗi sync: ' + err.message);
-  }
-}
-
-// ------------------ API ------------------
+// ------------------ API nhận từ Site1 ------------------
 app.post('/api/khoa_nn', async (req, res) => {
   try {
-    const input = req.body || {};
-    await upsertLop(input.lop || []);
-    await upsertSinhVien(input.sinhvien || []);
-    await upsertDangKy(input.dangky || []);
-    writeLog("✅ Nhận & lưu dữ liệu từ Site1");
-    res.json({ message: '✅ Đã lưu dữ liệu vào Site3' });
-  } catch (err) {
-    writeLog(`❌ /api/khoa_nn: ${err.message}`);
-    res.status(500).json({ error: err.message });
+    const data = req.body;
+    await upsertLop(data.lop || []);
+    await upsertSinhVien(data.sinhvien || []);
+    await upsertDangKy(data.dangky || []);
+    writeLog("✅ Site3 nhận & lưu dữ liệu từ Site1");
+
+    // ✅ gửi lại thay đổi nếu có
+    syncToSite1();
+
+    res.json({ ok: true });
+  } catch (e) {
+    writeLog("❌ Lỗi nhận từ Site1: " + e.message);
+    res.status(500).send(e.message);
   }
 });
 
-// GET xem data
+// ------------------ GET DATA ------------------
 app.get('/api/khoa_nn', (req, res) => {
-  const result = {};
-  db.serialize(() => {
-    db.all('SELECT * FROM Lop', (e1, rows1) => {
-      if (e1) return res.status(500).json({ error: e1.message });
-      result.lop = rows1;
-      db.all('SELECT * FROM SinhVien', (e2, rows2) => {
-        if (e2) return res.status(500).json({ error: e2.message });
-        result.sinhvien = rows2;
-        db.all('SELECT * FROM DangKy', (e3, rows3) => {
-          if (e3) return res.status(500).json({ error: e3.message });
-          result.dangky = rows3;
-          res.json(result);
-        });
+  db.all(`SELECT * FROM Lop`, (_, lop) => {
+    db.all(`SELECT * FROM SinhVien WHERE Khoa='NN'`, (_, sv) => {
+      db.all(`SELECT * FROM DangKy`, (_, dk) => {
+        res.json({ lop, sinhvien: sv, dangky: dk });
       });
     });
   });
 });
 
-// ✅ API ping test
-app.get('/api/ping', (req, res) => res.send("✅ Site3 OK"));
-
-// ✅ API status
-app.get('/api/status', (req, res) => {
-  const size = fs.statSync(DB_FILE).size;
-  res.json({
-    status: "running",
-    db_file: DB_FILE,
-    db_size_bytes: size
-  });
-});
-
-// ------------------ AUTO SYNC EVERY 5 MIN ------------------
+// ------------------ SCHEDULE AUTO SYNC 5p ------------------
 cron.schedule('*/5 * * * *', () => {
-  writeLog("⏰ Sync lên Site1...");
+  writeLog("⏰ Auto sync chạy...");
   syncToSite1();
 });
 
-// ------------------ START SERVER ------------------
-app.listen(PORT, () => writeLog(`🚀 Site3 chạy tại port ${PORT}`));
+// ------------------ START ------------------
+app.listen(PORT, () => writeLog(`🚀 Site3 running at ${PORT}`));
