@@ -1,10 +1,9 @@
-// server.js - Site3
-import express from "express";
-import fs from "fs";
-import cors from "cors";
-import sqlite3 from "sqlite3";
-import axios from "axios";
-import cron from "node-cron";
+const express = require('express');
+const fs = require('fs');
+const cors = require('cors');
+const sqlite3 = require('sqlite3').verbose();
+const axios = require('axios');
+const cron = require('node-cron');
 
 const app = express();
 app.use(express.json({ limit: '10mb' }));
