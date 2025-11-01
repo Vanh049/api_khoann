@@ -17,12 +17,12 @@ const LOG_FILE = path.join(DATA_DIR, 'log.txt');
 const BACKUP_JSON = path.join(DATA_DIR, 'site3_backup.json');
 const PORT = process.env.PORT || 10000;
 
-// URL Site1 để gửi dữ liệu
+// URL Site1
 const SITE1_RECV_URL = 'https://project05-global.somee.com/api/sync/from_khoann';
 
 // ------------------ PREPARE FOLDERS ------------------
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-if (!fs.existsSync(DB_FILE)) fs.writeFileSync(DB_FILE, '');
+// **Bỏ việc ghi file rỗng DB_FILE** để SQLite tự tạo
 if (!fs.existsSync(LOG_FILE)) fs.writeFileSync(LOG_FILE, '');
 
 // ------------------ HELPER LOG ------------------
@@ -70,8 +70,8 @@ db.serialize(() => {
 // ------------------ UPSERT FUNCTIONS ------------------
 function upsertLop(rows) {
   return new Promise(resolve => {
-    if (!rows.length) return resolve();
-    const stmt = db.prepare(`INSERT OR REPLACE INTO Lop (MaLop,TenLop,Khoa) VALUES (?,?,?)`);
+    if (!rows || !rows.length) return resolve();
+    const stmt = db.prepare(`INSERT OR REPLACE INTO Lop (MaLop, TenLop, Khoa) VALUES (?,?,?)`);
     rows.forEach(r => stmt.run(r.MaLop, r.TenLop, "NN"));
     stmt.finalize(resolve);
   });
@@ -79,7 +79,7 @@ function upsertLop(rows) {
 
 function upsertSinhVien(rows) {
   return new Promise(resolve => {
-    if (!rows.length) return resolve();
+    if (!rows || !rows.length) return resolve();
     const stmt = db.prepare(`INSERT OR REPLACE INTO SinhVien VALUES (?,?,?,?,?,?,?,?)`);
     const now = Date.now();
     rows.forEach(r => stmt.run(r.MaSV, r.HoTen, r.Phai, r.NgaySinh, r.MaLop, r.HocBong, "NN", now));
@@ -89,7 +89,7 @@ function upsertSinhVien(rows) {
 
 function upsertDangKy(rows) {
   return new Promise(resolve => {
-    if (!rows.length) return resolve();
+    if (!rows || !rows.length) return resolve();
     const stmt = db.prepare(`INSERT OR REPLACE INTO DangKy VALUES (?,?,?,?,?,?)`);
     const now = Date.now();
     rows.forEach(r => stmt.run(r.MaSV, r.MaMon, r.Diem1, r.Diem2, r.Diem3, now));
@@ -138,7 +138,7 @@ app.post('/api/khoa_nn', async (req, res) => {
     // Backup JSON
     backupJSON();
 
-    // Gửi lại Site1 nếu có thay đổi
+    // Sync lại Site1
     syncToSite1();
 
     res.json({ ok: true, message: '✅ Nhận dữ liệu thành công!' });
