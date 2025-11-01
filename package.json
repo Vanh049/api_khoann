@@ -7,13 +7,21 @@
     "start": "node server.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": ["api", "khoa_nn", "nodejs", "express"],
+  "keywords": [
+    "api",
+    "khoa_nn",
+    "nodejs",
+    "express"
+  ],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "axios": "^1.13.1",
     "body-parser": "^2.2.0",
     "cors": "^2.8.5",
-    "express": "^5.1.0"
+    "express": "^5.1.0",
+    "node-cron": "^4.2.1",
+    "sqlite3": "^5.1.7"
   }
 }
