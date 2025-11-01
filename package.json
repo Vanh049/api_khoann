@@ -4,9 +4,8 @@
   "description": "API nhận và hiển thị dữ liệu phân mảnh Khoa_NN",
   "main": "server.js",
   "scripts": {
-    "preinstall": "rm -rf node_modules/sqlite3",
-    "postinstall": "npm rebuild sqlite3 --build-from-source",
-    "start": "node server.js"
+    "start": "node server.js",
+    "postinstall": "npm rebuild sqlite3 --build-from-source"
   },
   "keywords": [
     "api",
