@@ -1,132 +1,136 @@
 const express = require('express');
-const fs = require('fs');
 const cors = require('cors');
-const sqlite3 = require('sqlite3').verbose();
+const { Pool } = require('pg');
 const axios = require('axios');
 const cron = require('node-cron');
-const path = require('path');
 
 const app = express();
 app.use(express.json({ limit: '10mb' }));
 app.use(cors());
 
 // ------------------ CONFIG ------------------
-const DATA_DIR = './data';
-const DB_FILE = path.join(DATA_DIR, 'site3.db');
-const LOG_FILE = path.join(DATA_DIR, 'log.txt');
-const BACKUP_JSON = path.join(DATA_DIR, 'site3_backup.json');
 const PORT = process.env.PORT || 10000;
 
 // URL Site1
 const SITE1_RECV_URL = 'https://project05-global.somee.com/api/sync/from_khoann';
 
-// ------------------ PREPARE FOLDERS ------------------
-if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-// **Bỏ việc ghi file rỗng DB_FILE** để SQLite tự tạo
-if (!fs.existsSync(LOG_FILE)) fs.writeFileSync(LOG_FILE, '');
+// ------------------ POSTGRES CONNECTION ------------------
+// Dùng connection string từ bạn
+const pool = new Pool({
+  connectionString: 'postgresql://site3_user:aQTo8AE24JAsIqbg0rC1ZwUsKA7kB3q5@dpg-d43eacali9vc73ctsvg0-a/khoann_db',
+  ssl: { rejectUnauthorized: false } // cần khi Render yêu cầu SSL
+});
 
 // ------------------ HELPER LOG ------------------
 function writeLog(msg) {
-  const logLine = `[${new Date().toLocaleString()}] ${msg}\n`;
-  fs.appendFileSync(LOG_FILE, logLine);
-  console.log(msg);
+  console.log(`[${new Date().toLocaleString()}] ${msg}`);
 }
 
-// ------------------ INIT SQLITE ------------------
-const db = new sqlite3.Database(DB_FILE, (err) => {
-  if (err) return writeLog('❌ DB lỗi: ' + err);
-  writeLog('✅ DB Site3 mở thành công');
-});
+// ------------------ INIT TABLES ------------------
+async function initTables() {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS Lop (
+        MaLop TEXT PRIMARY KEY,
+        TenLop TEXT,
+        Khoa TEXT
+      );
+    `);
 
-db.serialize(() => {
-  db.run(`CREATE TABLE IF NOT EXISTS Lop (
-    MaLop TEXT PRIMARY KEY,
-    TenLop TEXT,
-    Khoa TEXT
-  )`);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS SinhVien (
+        MaSV TEXT PRIMARY KEY,
+        HoTen TEXT,
+        Phai INTEGER,
+        NgaySinh TEXT,
+        MaLop TEXT,
+        HocBong REAL,
+        Khoa TEXT,
+        LastModified BIGINT
+      );
+    `);
 
-  db.run(`CREATE TABLE IF NOT EXISTS SinhVien (
-    MaSV TEXT PRIMARY KEY,
-    HoTen TEXT,
-    Phai INTEGER,
-    NgaySinh TEXT,
-    MaLop TEXT,
-    HocBong REAL,
-    Khoa TEXT,
-    LastModified INTEGER
-  )`);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS DangKy (
+        MaSV TEXT,
+        MaMon TEXT,
+        Diem1 REAL,
+        Diem2 REAL,
+        Diem3 REAL,
+        LastModified BIGINT,
+        PRIMARY KEY(MaSV, MaMon)
+      );
+    `);
 
-  db.run(`CREATE TABLE IF NOT EXISTS DangKy (
-    MaSV TEXT,
-    MaMon TEXT,
-    Diem1 REAL,
-    Diem2 REAL,
-    Diem3 REAL,
-    LastModified INTEGER,
-    PRIMARY KEY (MaSV, MaMon)
-  )`);
-});
+    writeLog('✅ PostgreSQL tables ready');
+  } catch (err) {
+    writeLog('❌ Init tables error: ' + err.message);
+  }
+}
+initTables();
 
 // ------------------ UPSERT FUNCTIONS ------------------
-function upsertLop(rows) {
-  return new Promise(resolve => {
-    if (!rows || !rows.length) return resolve();
-    const stmt = db.prepare(`INSERT OR REPLACE INTO Lop (MaLop, TenLop, Khoa) VALUES (?,?,?)`);
-    rows.forEach(r => stmt.run(r.MaLop, r.TenLop, "NN"));
-    stmt.finalize(resolve);
-  });
+async function upsertLop(rows) {
+  if (!rows || !rows.length) return;
+  const query = `
+    INSERT INTO Lop (MaLop, TenLop, Khoa) 
+    VALUES ($1,$2,$3) 
+    ON CONFLICT (MaLop) DO UPDATE 
+    SET TenLop=EXCLUDED.TenLop, Khoa=EXCLUDED.Khoa
+  `;
+  for (const r of rows) {
+    await pool.query(query, [r.MaLop, r.TenLop, r.Khoa || 'NN']);
+  }
+  writeLog(`✅ Lop: ${rows.length} bản ghi đã lưu`);
 }
 
-function upsertSinhVien(rows) {
-  return new Promise(resolve => {
-    if (!rows || !rows.length) return resolve();
-    const stmt = db.prepare(`INSERT OR REPLACE INTO SinhVien VALUES (?,?,?,?,?,?,?,?)`);
-    const now = Date.now();
-    rows.forEach(r => stmt.run(r.MaSV, r.HoTen, r.Phai, r.NgaySinh, r.MaLop, r.HocBong, "NN", now));
-    stmt.finalize(resolve);
-  });
+async function upsertSinhVien(rows) {
+  if (!rows || !rows.length) return;
+  const query = `
+    INSERT INTO SinhVien VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+    ON CONFLICT (MaSV) DO UPDATE 
+    SET HoTen=EXCLUDED.HoTen, Phai=EXCLUDED.Phai, NgaySinh=EXCLUDED.NgaySinh,
+        MaLop=EXCLUDED.MaLop, HocBong=EXCLUDED.HocBong, Khoa=EXCLUDED.Khoa,
+        LastModified=EXCLUDED.LastModified
+  `;
+  const now = Date.now();
+  for (const r of rows) {
+    await pool.query(query, [r.MaSV, r.HoTen, r.Phai, r.NgaySinh, r.MaLop, r.HocBong, r.Khoa || 'NN', now]);
+  }
+  writeLog(`✅ SinhVien: ${rows.length} bản ghi đã lưu`);
 }
 
-function upsertDangKy(rows) {
-  return new Promise(resolve => {
-    if (!rows || !rows.length) return resolve();
-    const stmt = db.prepare(`INSERT OR REPLACE INTO DangKy VALUES (?,?,?,?,?,?)`);
-    const now = Date.now();
-    rows.forEach(r => stmt.run(r.MaSV, r.MaMon, r.Diem1, r.Diem2, r.Diem3, now));
-    stmt.finalize(resolve);
-  });
-}
-// ------------------ BACKUP JSON ------------------
-function backupJSON() {
-  db.all(`SELECT * FROM Lop`, (_, lop) => {
-    db.all(`SELECT * FROM SinhVien`, (_, sv) => {
-      db.all(`SELECT * FROM DangKy`, (_, dk) => {
-        const data = { lop, sinhvien: sv, dangky: dk };
-        fs.writeFileSync(BACKUP_JSON, JSON.stringify(data, null, 2), 'utf-8');
-        writeLog('💾 Backup JSON xong: site3_backup.json');
-      });
-    });
-  });
+async function upsertDangKy(rows) {
+  if (!rows || !rows.length) return;
+  const query = `
+INSERT INTO DangKy VALUES ($1,$2,$3,$4,$5,$6)
+    ON CONFLICT (MaSV, MaMon) DO UPDATE 
+    SET Diem1=EXCLUDED.Diem1, Diem2=EXCLUDED.Diem2, Diem3=EXCLUDED.Diem3,
+        LastModified=EXCLUDED.LastModified
+  `;
+  const now = Date.now();
+  for (const r of rows) {
+    await pool.query(query, [r.MaSV, r.MaMon, r.Diem1, r.Diem2, r.Diem3, now]);
+  }
+  writeLog(`✅ DangKy: ${rows.length} bản ghi đã lưu`);
 }
 
 // ------------------ SYNC TO SITE1 ------------------
 async function syncToSite1() {
-  db.all(`SELECT * FROM Lop`, (_, lop) => {
-    db.all(`SELECT * FROM SinhVien WHERE Khoa='NN'`, (_, sv) => {
-      db.all(`SELECT * FROM DangKy`, async (_, dk) => {
-        const payload = { lop, sinhvien: sv, dangky: dk };
-        try {
-          await axios.post(SITE1_RECV_URL, payload);
-          writeLog('✅ Sync dữ liệu NN -> Site1 thành công');
-        } catch (err) {
-          writeLog('❌ Sync lên Site1 lỗi: ' + err.message);
-        }
-      });
-    });
-  });
+  try {
+    const lop = (await pool.query(`SELECT * FROM Lop`)).rows;
+    const sv = (await pool.query(`SELECT * FROM SinhVien WHERE Khoa='NN'`)).rows;
+    const dk = (await pool.query(`SELECT * FROM DangKy`)).rows;
+
+    const payload = { lop, sinhvien: sv, dangky: dk };
+    await axios.post(SITE1_RECV_URL, payload);
+    writeLog('✅ Sync dữ liệu NN -> Site1 thành công');
+  } catch (err) {
+    writeLog('❌ Sync lên Site1 lỗi: ' + err.message);
+  }
 }
 
-// ------------------ API NHẬN DỮ LIỆU ------------------
+// ------------------ API ------------------
 app.post('/api/khoa_nn', async (req, res) => {
   try {
     const data = req.body;
@@ -135,11 +139,7 @@ app.post('/api/khoa_nn', async (req, res) => {
     await upsertDangKy(data.dangky || []);
     writeLog('📩 Site3 nhận & lưu dữ liệu từ Site1');
 
-    // Backup JSON
-    backupJSON();
-
-    // Sync lại Site1
-    syncToSite1();
+    syncToSite1(); // async
 
     res.json({ ok: true, message: '✅ Nhận dữ liệu thành công!' });
   } catch (err) {
@@ -148,22 +148,22 @@ app.post('/api/khoa_nn', async (req, res) => {
   }
 });
 
-// ------------------ API LẤY DỮ LIỆU ------------------
-app.get('/api/khoa_nn', (req, res) => {
-  db.all(`SELECT * FROM Lop`, (_, lop) => {
-    db.all(`SELECT * FROM SinhVien WHERE Khoa='NN'`, (_, sv) => {
-      db.all(`SELECT * FROM DangKy`, (_, dk) => {
-        res.json({ lop, sinhvien: sv, dangky: dk });
-      });
-    });
-  });
+app.get('/api/khoa_nn', async (req, res) => {
+  try {
+    const lop = (await pool.query(`SELECT * FROM Lop`)).rows;
+    const sv = (await pool.query(`SELECT * FROM SinhVien WHERE Khoa='NN'`)).rows;
+    const dk = (await pool.query(`SELECT * FROM DangKy`)).rows;
+    res.json({ lop, sinhvien: sv, dangky: dk });
+  } catch (err) {
+    res.status(500).send(err.message);
+  }
 });
 
-// ------------------ AUTO SYNC 5 PHÚT ------------------
+// ------------------ AUTO SYNC 5 phút ------------------
 cron.schedule('*/5 * * * *', () => {
   writeLog('⏱ Auto sync 5 phút chạy...');
   syncToSite1();
 });
 
 // ------------------ START SERVER ------------------
-app.listen(PORT, () => writeLog(`🌐 Site3 chạy tại port ${PORT}`));
+app.listen(PORT, () => writeLog(`🌐 Site3 running at port ${PORT}`));
