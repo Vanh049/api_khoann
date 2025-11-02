@@ -2,7 +2,6 @@ const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
 const axios = require('axios');
-const cron = require('node-cron');
 
 const app = express();
 app.use(express.json({ limit: '10mb' }));
@@ -10,7 +9,7 @@ app.use(cors());
 
 const PORT = process.env.PORT || 10000;
 
-// URL Site1
+// URL Site1 (nếu cần gửi ngược)
 const SITE1_RECV_URL = 'https://project05-global.somee.com/api/sync/from_khoann';
 
 // PostgreSQL Connection
@@ -19,14 +18,15 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false }
 });
 
-// Log helper
+// ------------------ LOG HELPER ------------------
 function writeLog(msg) {
   console.log(`[${new Date().toLocaleString()}] ${msg}`);
 }
 
-// Init Tables
+// ------------------ INIT TABLES ------------------
 async function initTables() {
   try {
+    // Lop
     await pool.query(`
       CREATE TABLE IF NOT EXISTS Lop (
         MaLop VARCHAR(10) PRIMARY KEY,
@@ -35,19 +35,22 @@ async function initTables() {
       );
     `);
 
+    // SinhVien
     await pool.query(`
       CREATE TABLE IF NOT EXISTS SinhVien (
         MaSV VARCHAR(10) PRIMARY KEY,
-        HoTen NVARCHAR(200) NOT NULL,
-        Phai BIT,
+        HoTen VARCHAR(200) NOT NULL,
+        Phai SMALLINT,
         NgaySinh DATE,
         MaLop VARCHAR(10),
         HocBong FLOAT,
         Khoa VARCHAR(10),
-        LastModified BIGINT
+        LastModified BIGINT,
+        rowguid UUID DEFAULT gen_random_uuid()
       );
     `);
 
+    // DangKy
     await pool.query(`
       CREATE TABLE IF NOT EXISTS DangKy (
         MaSV VARCHAR(10),
@@ -67,7 +70,7 @@ async function initTables() {
 }
 initTables();
 
-// UPSERT functions
+// ------------------ UPSERT FUNCTIONS ------------------
 async function upsertLop(rows) {
   if (!rows || !rows.length) return;
   const query = `
@@ -78,7 +81,7 @@ async function upsertLop(rows) {
       Khoa = EXCLUDED.Khoa
   `;
   for (const r of rows) {
-    await pool.query(query, [r.MaLop, r.TenLop, r.Khoa || 'NN']);
+    await pool.query(query, [r.malop, r.tenlop, r.khoa?.trim() || 'NN']);
   }
   writeLog(`✅ Lop: ${rows.length} bản ghi đã lưu`);
 }
@@ -99,15 +102,24 @@ async function upsertSinhVien(rows) {
   `;
   const now = Date.now();
   for (const r of rows) {
-    const phaiVal = (r.Phai === true || r.Phai === 1) ? 1 : 0; // BIT value
-    await pool.query(query, [r.MaSV, r.HoTen, phaiVal, r.NgaySinh, r.MaLop, r.HocBong, r.Khoa || 'NN', now]);
+    const phaiVal = (r.phai === true || r.phai === 1) ? 1 : 0;
+    await pool.query(query, [
+      r.masv,
+      r.hoten,
+      phaiVal,
+      r.ngaysinh || null,
+      r.malop || null,
+      r.hocbong || 0,
+      r.khoa?.trim() || 'NN',
+      now
+    ]);
   }
   writeLog(`✅ SinhVien: ${rows.length} bản ghi đã lưu`);
 }
 
 async function upsertDangKy(rows) {
   if (!rows || !rows.length) return;
-const query = `
+  const query = `
     INSERT INTO DangKy (MaSV, MaMon, Diem1, Diem2, Diem3, LastModified)
     VALUES ($1,$2,$3,$4,$5,$6)
     ON CONFLICT (MaSV, MaMon) DO UPDATE SET
@@ -118,27 +130,21 @@ const query = `
   `;
   const now = Date.now();
   for (const r of rows) {
-    await pool.query(query, [r.MaSV, r.MaMon, r.Diem1, r.Diem2, r.Diem3, now]);
+    await pool.query(query, [
+      r.masv,
+      r.mamon,
+      r.diem1 || 0,
+      r.diem2 || 0,
+      r.diem3 || 0,
+      now
+    ]);
   }
   writeLog(`✅ DangKy: ${rows.length} bản ghi đã lưu`);
 }
 
-// SYNC TO SITE1
-async function syncToSite1() {
-  try {
-    const lop = (await pool.query(`SELECT * FROM Lop`)).rows;
-    const sv = (await pool.query(`SELECT * FROM SinhVien WHERE LOWER(Khoa)='nn'`)).rows;
-    const dk = (await pool.query(`SELECT * FROM DangKy`)).rows;
+// ------------------ API ------------------
 
-    const payload = { lop, sinhvien: sv, dangky: dk };
-    await axios.post(SITE1_RECV_URL, payload);
-    writeLog('✅ Sync dữ liệu NN -> Site1 thành công');
-  } catch (err) {
-    writeLog('❌ Sync lên Site1 lỗi: ' + err.message);
-  }
-}
-
-// API
+// Nhận dữ liệu từ Site1
 app.post('/api/khoa_nn', async (req, res) => {
   try {
     const data = req.body;
@@ -147,7 +153,6 @@ app.post('/api/khoa_nn', async (req, res) => {
     await upsertDangKy(data.dangky || []);
     writeLog('📩 Site3 nhận & lưu dữ liệu từ Site1');
 
-    syncToSite1(); // async
     res.json({ ok: true, message: '✅ Nhận dữ liệu thành công!' });
   } catch (err) {
     writeLog('❌ Lỗi nhận dữ liệu từ Site1: ' + err.message);
@@ -155,22 +160,17 @@ app.post('/api/khoa_nn', async (req, res) => {
   }
 });
 
+// Xem dữ liệu Site3
 app.get('/api/khoa_nn', async (req, res) => {
   try {
     const lop = (await pool.query(`SELECT * FROM Lop`)).rows;
-    const sv = (await pool.query(`SELECT * FROM SinhVien WHERE LOWER(Khoa)='nn'`)).rows;
-    const dk = (await pool.query(`SELECT * FROM DangKy`)).rows;
-    res.json({ lop, sinhvien: sv, dangky: dk });
+    const sinhvien = (await pool.query(`SELECT * FROM SinhVien`)).rows;
+    const dangky = (await pool.query(`SELECT * FROM DangKy`)).rows;
+    res.json({ lop, sinhvien, dangky });
   } catch (err) {
     res.status(500).send(err.message);
   }
 });
 
-// Auto Sync 5 phút
-cron.schedule('*/5 * * * *', () => {
-  writeLog('⏱ Auto sync 5 phút chạy...');
-  syncToSite1();
-});
-
-// START SERVER
+// ------------------ START SERVER ------------------
 app.listen(PORT, () => writeLog(`🌐 Site3 running at port ${PORT}`));
