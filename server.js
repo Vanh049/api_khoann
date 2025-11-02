@@ -11,14 +11,13 @@ app.use(cors());
 // ------------------ CONFIG ------------------
 const PORT = process.env.PORT || 10000;
 
-// URL Site1
+// URL Site1 (C#)
 const SITE1_RECV_URL = 'https://project05-global.somee.com/api/sync/from_khoann';
 
 // ------------------ POSTGRES CONNECTION ------------------
-// Dùng connection string từ bạn
 const pool = new Pool({
-  connectionString: 'postgresql://site3_user:aQTo8AE24JAsIqbg0rC1ZwUsKA7kB3q5@dpg-d43eacali9vc73ctsvg0-a/khoann_db',
-  ssl: { rejectUnauthorized: false } // cần khi Render yêu cầu SSL
+  connectionString: process.env.DATABASE_URL || 'postgresql://site3_user:aQTo8AE24JAsIqbg0rC1ZwUsKA7kB3q5@dpg-d43eacali9vc73ctsvg0-a/khoann_db',
+  ssl: { rejectUnauthorized: false }
 });
 
 // ------------------ HELPER LOG ------------------
@@ -73,9 +72,9 @@ initTables();
 async function upsertLop(rows) {
   if (!rows || !rows.length) return;
   const query = `
-    INSERT INTO Lop (MaLop, TenLop, Khoa) 
-    VALUES ($1,$2,$3) 
-    ON CONFLICT (MaLop) DO UPDATE 
+    INSERT INTO Lop (MaLop, TenLop, Khoa)
+    VALUES ($1,$2,$3)
+    ON CONFLICT (MaLop) DO UPDATE
     SET TenLop=EXCLUDED.TenLop, Khoa=EXCLUDED.Khoa
   `;
   for (const r of rows) {
@@ -88,29 +87,44 @@ async function upsertSinhVien(rows) {
   if (!rows || !rows.length) return;
   const query = `
     INSERT INTO SinhVien VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-    ON CONFLICT (MaSV) DO UPDATE 
-    SET HoTen=EXCLUDED.HoTen, Phai=EXCLUDED.Phai, NgaySinh=EXCLUDED.NgaySinh,
-        MaLop=EXCLUDED.MaLop, HocBong=EXCLUDED.HocBong, Khoa=EXCLUDED.Khoa,
+    ON CONFLICT (MaSV) DO UPDATE
+    SET HoTen=EXCLUDED.HoTen,
+        Phai=EXCLUDED.Phai,
+        NgaySinh=EXCLUDED.NgaySinh,
+        MaLop=EXCLUDED.MaLop,
+        HocBong=EXCLUDED.HocBong,
+        Khoa=EXCLUDED.Khoa,
         LastModified=EXCLUDED.LastModified
   `;
   const now = Date.now();
   for (const r of rows) {
-    await pool.query(query, [r.MaSV, r.HoTen, r.Phai, r.NgaySinh, r.MaLop, r.HocBong, r.Khoa || 'NN', now]);
+    const phaiInt = (r.Phai === true) ? 1 : (r.Phai === false ? 0 : parseInt(r.Phai) || 0);
+    const hocBongNum = parseFloat(r.HocBong) || 0;
+    await pool.query(query, [r.MaSV, r.HoTen, phaiInt, r.NgaySinh, r.MaLop, hocBongNum, r.Khoa || 'NN', now]);
   }
-  writeLog(`✅ SinhVien: ${rows.length} bản ghi đã lưu`);
+writeLog(`✅ SinhVien: ${rows.length} bản ghi đã lưu`);
 }
 
 async function upsertDangKy(rows) {
   if (!rows || !rows.length) return;
   const query = `
-INSERT INTO DangKy VALUES ($1,$2,$3,$4,$5,$6)
-    ON CONFLICT (MaSV, MaMon) DO UPDATE 
-    SET Diem1=EXCLUDED.Diem1, Diem2=EXCLUDED.Diem2, Diem3=EXCLUDED.Diem3,
+    INSERT INTO DangKy VALUES ($1,$2,$3,$4,$5,$6)
+    ON CONFLICT (MaSV, MaMon) DO UPDATE
+    SET Diem1=EXCLUDED.Diem1,
+        Diem2=EXCLUDED.Diem2,
+        Diem3=EXCLUDED.Diem3,
         LastModified=EXCLUDED.LastModified
   `;
   const now = Date.now();
   for (const r of rows) {
-    await pool.query(query, [r.MaSV, r.MaMon, r.Diem1, r.Diem2, r.Diem3, now]);
+    await pool.query(query, [
+      r.MaSV,
+      r.MaMon,
+      parseFloat(r.Diem1) || 0,
+      parseFloat(r.Diem2) || 0,
+      parseFloat(r.Diem3) || 0,
+      now
+    ]);
   }
   writeLog(`✅ DangKy: ${rows.length} bản ghi đã lưu`);
 }
@@ -119,7 +133,7 @@ INSERT INTO DangKy VALUES ($1,$2,$3,$4,$5,$6)
 async function syncToSite1() {
   try {
     const lop = (await pool.query(`SELECT * FROM Lop`)).rows;
-    const sv = (await pool.query(`SELECT * FROM SinhVien WHERE Khoa='NN'`)).rows;
+    const sv = (await pool.query(`SELECT * FROM SinhVien WHERE LOWER(Khoa)='nn'`)).rows;
     const dk = (await pool.query(`SELECT * FROM DangKy`)).rows;
 
     const payload = { lop, sinhvien: sv, dangky: dk };
@@ -151,7 +165,7 @@ app.post('/api/khoa_nn', async (req, res) => {
 app.get('/api/khoa_nn', async (req, res) => {
   try {
     const lop = (await pool.query(`SELECT * FROM Lop`)).rows;
-    const sv = (await pool.query(`SELECT * FROM SinhVien WHERE Khoa='NN'`)).rows;
+    const sv = (await pool.query(`SELECT * FROM SinhVien WHERE LOWER(Khoa)='nn'`)).rows;
     const dk = (await pool.query(`SELECT * FROM DangKy`)).rows;
     res.json({ lop, sinhvien: sv, dangky: dk });
   } catch (err) {
