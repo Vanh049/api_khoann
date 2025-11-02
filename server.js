@@ -23,36 +23,36 @@ function writeLog(msg) {
 async function initTables() {
   try {
     await pool.query(`
-      CREATE TABLE IF NOT EXISTS Lop (
-        MaLop VARCHAR(10) PRIMARY KEY,
-        TenLop VARCHAR(200),
-        Khoa VARCHAR(10)
+      CREATE TABLE IF NOT EXISTS lop (
+        malop VARCHAR(10) PRIMARY KEY,
+        tenlop VARCHAR(200),
+        khoa VARCHAR(10)
       );
     `);
 
     await pool.query(`
-      CREATE TABLE IF NOT EXISTS SinhVien (
-        MaSV VARCHAR(10) PRIMARY KEY,
-        HoTen VARCHAR(200) NOT NULL,
-        Phai SMALLINT,
-        NgaySinh DATE,
-        MaLop VARCHAR(10),
-        HocBong FLOAT,
-        Khoa VARCHAR(10),
-        LastModified BIGINT,
+      CREATE TABLE IF NOT EXISTS sinhvien (
+        masv VARCHAR(10) PRIMARY KEY,
+        hoten VARCHAR(200) NOT NULL,
+        phai SMALLINT,
+        ngaysinh DATE,
+        malop VARCHAR(10),
+        hocbong FLOAT,
+        khoa VARCHAR(10),
+        lastmodified BIGINT,
         rowguid UUID DEFAULT gen_random_uuid()
       );
     `);
 
     await pool.query(`
-      CREATE TABLE IF NOT EXISTS DangKy (
-        MaSV VARCHAR(10),
-        MaMon VARCHAR(10),
-        Diem1 FLOAT,
-        Diem2 FLOAT,
-        Diem3 FLOAT,
-        LastModified BIGINT,
-        PRIMARY KEY(MaSV, MaMon)
+      CREATE TABLE IF NOT EXISTS dangky (
+        masv VARCHAR(10),
+        mamon VARCHAR(10),
+        diem1 FLOAT,
+        diem2 FLOAT,
+        diem3 FLOAT,
+        lastmodified BIGINT,
+        PRIMARY KEY(masv, mamon)
       );
     `);
 
@@ -67,11 +67,11 @@ initTables();
 async function upsertLop(rows) {
   if (!Array.isArray(rows) || !rows.length) return;
   const query = `
-    INSERT INTO Lop (MaLop, TenLop, Khoa) 
+    INSERT INTO lop (malop, tenlop, khoa) 
     VALUES ($1,$2,$3)
-    ON CONFLICT (MaLop) DO UPDATE SET
-      TenLop = EXCLUDED.TenLop,
-      Khoa = EXCLUDED.Khoa
+    ON CONFLICT (malop) DO UPDATE SET
+      tenlop = EXCLUDED.tenlop,
+      khoa = EXCLUDED.khoa
   `;
   for (const r of rows) {
     try {
@@ -86,16 +86,16 @@ async function upsertLop(rows) {
 async function upsertSinhVien(rows) {
   if (!Array.isArray(rows) || !rows.length) return;
   const query = `
-    INSERT INTO SinhVien (MaSV, HoTen, Phai, NgaySinh, MaLop, HocBong, Khoa, LastModified)
+    INSERT INTO sinhvien (masv, hoten, phai, ngaysinh, malop, hocbong, khoa, lastmodified)
     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-    ON CONFLICT (MaSV) DO UPDATE SET
-      HoTen = EXCLUDED.HoTen,
-      Phai = EXCLUDED.Phai,
-      NgaySinh = EXCLUDED.NgaySinh,
-      MaLop = EXCLUDED.MaLop,
-      HocBong = EXCLUDED.HocBong,
-      Khoa = EXCLUDED.Khoa,
-      LastModified = EXCLUDED.LastModified
+    ON CONFLICT (masv) DO UPDATE SET
+      hoten = EXCLUDED.hoten,
+      phai = EXCLUDED.phai,
+      ngaysinh = EXCLUDED.ngaysinh,
+      malop = EXCLUDED.malop,
+      hocbong = EXCLUDED.hocbong,
+      khoa = EXCLUDED.khoa,
+      lastmodified = EXCLUDED.lastmodified
   `;
   const now = Date.now();
   for (const r of rows) {
@@ -121,13 +121,13 @@ r.ngaysinh || null,
 async function upsertDangKy(rows) {
   if (!Array.isArray(rows) || !rows.length) return;
   const query = `
-    INSERT INTO DangKy (MaSV, MaMon, Diem1, Diem2, Diem3, LastModified)
+    INSERT INTO dangky (masv, mamon, diem1, diem2, diem3, lastmodified)
     VALUES ($1,$2,$3,$4,$5,$6)
-    ON CONFLICT (MaSV, MaMon) DO UPDATE SET
-      Diem1 = EXCLUDED.Diem1,
-      Diem2 = EXCLUDED.Diem2,
-      Diem3 = EXCLUDED.Diem3,
-      LastModified = EXCLUDED.LastModified
+    ON CONFLICT (masv, mamon) DO UPDATE SET
+      diem1 = EXCLUDED.diem1,
+      diem2 = EXCLUDED.diem2,
+      diem3 = EXCLUDED.diem3,
+      lastmodified = EXCLUDED.lastmodified
   `;
   const now = Date.now();
   for (const r of rows) {
@@ -167,9 +167,9 @@ app.post('/api/khoa_nn', async (req, res) => {
 // Xem dữ liệu Site3
 app.get('/api/khoa_nn', async (req, res) => {
   try {
-    const lop = (await pool.query(`SELECT * FROM Lop`)).rows;
-    const sinhvien = (await pool.query(`SELECT * FROM SinhVien`)).rows;
-    const dangky = (await pool.query(`SELECT * FROM DangKy`)).rows;
+    const lop = (await pool.query(`SELECT * FROM lop`)).rows;
+    const sinhvien = (await pool.query(`SELECT * FROM sinhvien`)).rows;
+    const dangky = (await pool.query(`SELECT * FROM dangky`)).rows;
     res.json({ lop, sinhvien, dangky });
   } catch (err) {
     res.status(500).json({ ok: false, message: err.message });
