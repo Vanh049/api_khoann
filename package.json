@@ -4,8 +4,7 @@
   "description": "API nhận và hiển thị dữ liệu phân mảnh Khoa_NN",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "postinstall": "npm rebuild sqlite3 --build-from-source"
+    "start": "node server.js"
   },
   "keywords": [
     "api",
@@ -22,10 +21,7 @@
     "cors": "^2.8.5",
     "express": "^5.1.0",
     "node-cron": "^4.2.1",
-    "pg": "^8.16.3",
-    "sqlite3": "^5.1.7"
+    "pg": "^8.16.3"
   },
-  "devDependencies": {
-    "node-gyp": "^11.5.0"
-  }
+  "devDependencies": {}
 }
