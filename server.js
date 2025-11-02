@@ -10,8 +10,6 @@ app.use(cors());
 
 // ------------------ CONFIG ------------------
 const PORT = process.env.PORT || 10000;
-
-// URL Site1 (C#)
 const SITE1_RECV_URL = 'https://project05-global.somee.com/api/sync/from_khoann';
 
 // ------------------ POSTGRES CONNECTION ------------------
@@ -20,7 +18,7 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false }
 });
 
-// ------------------ HELPER LOG ------------------
+// ------------------ LOG ------------------
 function writeLog(msg) {
   console.log(`[${new Date().toLocaleString()}] ${msg}`);
 }
@@ -57,7 +55,7 @@ async function initTables() {
         Diem2 REAL,
         Diem3 REAL,
         LastModified BIGINT,
-        PRIMARY KEY(MaSV, MaMon)
+        PRIMARY KEY (MaSV, MaMon)
       );
     `);
 
@@ -75,7 +73,7 @@ async function upsertLop(rows) {
     INSERT INTO Lop (MaLop, TenLop, Khoa)
     VALUES ($1,$2,$3)
     ON CONFLICT (MaLop) DO UPDATE
-    SET TenLop=EXCLUDED.TenLop, Khoa=EXCLUDED.Khoa
+      SET TenLop=EXCLUDED.TenLop, Khoa=EXCLUDED.Khoa;
   `;
   for (const r of rows) {
     await pool.query(query, [r.MaLop, r.TenLop, r.Khoa || 'NN']);
@@ -86,43 +84,45 @@ async function upsertLop(rows) {
 async function upsertSinhVien(rows) {
   if (!rows || !rows.length) return;
   const query = `
-    INSERT INTO SinhVien VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+    INSERT INTO SinhVien (MaSV, HoTen, Phai, NgaySinh, MaLop, HocBong, Khoa, LastModified)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
     ON CONFLICT (MaSV) DO UPDATE
-    SET HoTen=EXCLUDED.HoTen,
-        Phai=EXCLUDED.Phai,
-        NgaySinh=EXCLUDED.NgaySinh,
-        MaLop=EXCLUDED.MaLop,
-        HocBong=EXCLUDED.HocBong,
-        Khoa=EXCLUDED.Khoa,
-        LastModified=EXCLUDED.LastModified
+      SET HoTen=EXCLUDED.HoTen, Phai=EXCLUDED.Phai, NgaySinh=EXCLUDED.NgaySinh,
+          MaLop=EXCLUDED.MaLop, HocBong=EXCLUDED.HocBong, Khoa=EXCLUDED.Khoa,
+          LastModified=EXCLUDED.LastModified;
   `;
   const now = Date.now();
   for (const r of rows) {
-    const phaiInt = (r.Phai === true) ? 1 : (r.Phai === false ? 0 : parseInt(r.Phai) || 0);
-    const hocBongNum = parseFloat(r.HocBong) || 0;
-    await pool.query(query, [r.MaSV, r.HoTen, phaiInt, r.NgaySinh, r.MaLop, hocBongNum, r.Khoa || 'NN', now]);
+    await pool.query(query, [
+      r.MaSV,
+      r.HoTen,
+      parseInt(r.Phai) || 0,
+      r.NgaySinh,
+      r.MaLop,
+      parseFloat(r.HocBong) || 0,
+      r.Khoa || 'NN',
+      now
+    ]);
   }
-writeLog(`✅ SinhVien: ${rows.length} bản ghi đã lưu`);
+  writeLog(`✅ SinhVien: ${rows.length} bản ghi đã lưu`);
 }
-
 async function upsertDangKy(rows) {
   if (!rows || !rows.length) return;
   const query = `
-    INSERT INTO DangKy VALUES ($1,$2,$3,$4,$5,$6)
+    INSERT INTO DangKy (MaSV, MaMon, Diem1, Diem2, Diem3, LastModified)
+    VALUES ($1,$2,$3,$4,$5,$6)
     ON CONFLICT (MaSV, MaMon) DO UPDATE
-    SET Diem1=EXCLUDED.Diem1,
-        Diem2=EXCLUDED.Diem2,
-        Diem3=EXCLUDED.Diem3,
-        LastModified=EXCLUDED.LastModified
+      SET Diem1=EXCLUDED.Diem1, Diem2=EXCLUDED.Diem2, Diem3=EXCLUDED.Diem3,
+          LastModified=EXCLUDED.LastModified;
   `;
   const now = Date.now();
   for (const r of rows) {
     await pool.query(query, [
       r.MaSV,
       r.MaMon,
-      parseFloat(r.Diem1) || 0,
-      parseFloat(r.Diem2) || 0,
-      parseFloat(r.Diem3) || 0,
+      parseFloat(r.Diem1 || 0),
+      parseFloat(r.Diem2 || 0),
+      parseFloat(r.Diem3 || 0),
       now
     ]);
   }
@@ -151,6 +151,7 @@ app.post('/api/khoa_nn', async (req, res) => {
     await upsertLop(data.lop || []);
     await upsertSinhVien(data.sinhvien || []);
     await upsertDangKy(data.dangky || []);
+
     writeLog('📩 Site3 nhận & lưu dữ liệu từ Site1');
 
     syncToSite1(); // async
