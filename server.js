@@ -1,18 +1,19 @@
-const express = require('express');
-const cors = require('cors');
-const { Pool } = require('pg');
+const express = require("express");
+const cors = require("cors");
+const { Pool } = require("pg");
 
 const app = express();
-app.use(express.json({ limit: '50mb' }));
+app.use(express.json({ limit: "50mb" }));
 app.use(cors());
 
 const PORT = process.env.PORT || 10000;
 
 // ================== PostgreSQL Connection ==================
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || 
-    'postgresql://site3_user:aQTo8AE24JAsIqbg0rC1ZwUsKA7kB3q5@dpg-d43eacali9vc73ctsvg0-a/khoann_db',
-  ssl: { rejectUnauthorized: false }
+  connectionString:
+    process.env.DATABASE_URL ||
+    "postgresql://site3_user:aQTo8AE24JAsIqbg0rC1ZwUsKA7kB3q5@dpg-d43eacali9vc73ctsvg0-a/khoann_db",
+  ssl: { rejectUnauthorized: false },
 });
 
 // ------------------ LOG HELPER ------------------
@@ -57,12 +58,22 @@ async function initTables() {
       );
     `);
 
-    writeLog('✅ PostgreSQL tables ready.');
+    writeLog("✅ PostgreSQL tables ready.");
   } catch (err) {
-    writeLog('❌ Init tables error: ' + err.message);
+    writeLog("❌ Init tables error: " + err.message);
   }
 }
 initTables();
+
+// ------------------ UTIL: Normalize Keys ------------------
+function normalizeKeys(obj) {
+  if (!obj || typeof obj !== "object") return obj;
+  const normalized = {};
+  for (let key in obj) {
+    normalized[key.toLowerCase()] = obj[key];
+  }
+  return normalized;
+}
 
 // ------------------ UPSERT FUNCTIONS ------------------
 async function upsertLop(rows = []) {
@@ -74,9 +85,14 @@ async function upsertLop(rows = []) {
       tenlop = EXCLUDED.tenlop,
       khoa = EXCLUDED.khoa;
   `;
-  for (const r of rows) {
+  for (const item of rows) {
+    const r = normalizeKeys(item);
     try {
-      await pool.query(query, [r.malop?.trim(), r.tenlop?.trim(), (r.khoa || 'NN').trim()]);
+      await pool.query(query, [
+        r.malop?.trim(),
+        r.tenlop?.trim(),
+        (r.khoa || "NN").trim(),
+      ]);
     } catch (e) {
       writeLog(`⚠️ Lỗi upsertLop: ${e.message} - ${JSON.stringify(r)}`);
     }
@@ -91,7 +107,7 @@ async function upsertSinhVien(rows = []) {
     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
     ON CONFLICT (masv) DO UPDATE SET
       hoten = EXCLUDED.hoten,
-      phai = EXCLUDED.phai,
+phai = EXCLUDED.phai,
       ngaysinh = EXCLUDED.ngaysinh,
       malop = EXCLUDED.malop,
       hocbong = EXCLUDED.hocbong,
@@ -99,18 +115,19 @@ async function upsertSinhVien(rows = []) {
       lastmodified = EXCLUDED.lastmodified;
   `;
   const now = Date.now();
-  for (const r of rows) {
+  for (const item of rows) {
+    const r = normalizeKeys(item);
     try {
-      const phaiVal = (r.phai === true || r.phai === 1) ? 1 : 0;
-await pool.query(query, [
+      const phaiVal = r.phai === true || r.phai === 1 ? 1 : 0;
+      await pool.query(query, [
         r.masv?.trim(),
         r.hoten?.trim(),
         phaiVal,
-        r.ngaysinh ? r.ngaysinh : null,
+        r.ngaysinh || null,
         r.malop?.trim() || null,
         r.hocbong || 0,
-        (r.khoa || 'NN').trim(),
-        now
+        (r.khoa || "NN").trim(),
+        now,
       ]);
     } catch (e) {
       writeLog(`⚠️ Lỗi upsertSinhVien: ${e.message} - ${JSON.stringify(r)}`);
@@ -131,7 +148,8 @@ async function upsertDangKy(rows = []) {
       lastmodified = EXCLUDED.lastmodified;
   `;
   const now = Date.now();
-  for (const r of rows) {
+  for (const item of rows) {
+    const r = normalizeKeys(item);
     try {
       await pool.query(query, [
         r.masv?.trim(),
@@ -139,7 +157,7 @@ async function upsertDangKy(rows = []) {
         r.diem1 ?? 0,
         r.diem2 ?? 0,
         r.diem3 ?? 0,
-        now
+        now,
       ]);
     } catch (e) {
       writeLog(`⚠️ Lỗi upsertDangKy: ${e.message} - ${JSON.stringify(r)}`);
@@ -151,26 +169,29 @@ async function upsertDangKy(rows = []) {
 // ------------------ API ------------------
 
 // ✅ Nhận dữ liệu từ Site1 (.NET)
-app.post('/api/khoa_nn', async (req, res) => {
+app.post("/api/khoa_nn", async (req, res) => {
   try {
     const data = req.body || {};
     await upsertLop(data.lop);
     await upsertSinhVien(data.sinhvien);
     await upsertDangKy(data.dangky);
-    writeLog('✅ Site3 nhận & lưu dữ liệu từ Site1');
-    res.json({ ok: true, message: '✅ Nhận dữ liệu thành công!' });
+    writeLog("✅ Site3 nhận & lưu dữ liệu từ Site1");
+    res.json({ ok: true, message: "✅ Nhận dữ liệu thành công!" });
   } catch (err) {
-    writeLog('❌ Lỗi nhận dữ liệu từ Site1: ' + err.message);
+    writeLog("❌ Lỗi nhận dữ liệu từ Site1: " + err.message);
     res.status(500).json({ ok: false, message: err.message });
   }
 });
 
 // ✅ Xem toàn bộ dữ liệu tại Site3
-app.get('/api/khoa_nn', async (req, res) => {
+app.get("/api/khoa_nn", async (req, res) => {
   try {
     const lop = (await pool.query(`SELECT * FROM lop ORDER BY malop`)).rows;
-    const sinhvien = (await pool.query(`SELECT * FROM sinhvien ORDER BY masv`)).rows;
-    const dangky = (await pool.query(`SELECT * FROM dangky ORDER BY masv, mamon`)).rows;
+    const sinhvien = (await pool.query(`SELECT * FROM sinhvien ORDER BY masv`))
+      .rows;
+    const dangky = (
+      await pool.query(`SELECT * FROM dangky ORDER BY masv, mamon`)
+    ).rows;
     res.json({ lop, sinhvien, dangky });
   } catch (err) {
     res.status(500).json({ ok: false, message: err.message });
