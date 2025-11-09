@@ -58,9 +58,9 @@ async function initTables() {
       );
     `);
 
-    writeLog("✅ PostgreSQL tables ready.");
+    writeLog(" PostgreSQL tables ready.");
   } catch (err) {
-    writeLog("❌ Init tables error: " + err.message);
+    writeLog(" Init tables error: " + err.message);
   }
 }
 initTables();
@@ -94,10 +94,10 @@ async function upsertLop(rows = []) {
         (r.khoa || "NN").trim(),
       ]);
     } catch (e) {
-      writeLog(`⚠️ Lỗi upsertLop: ${e.message} - ${JSON.stringify(r)}`);
+      writeLog(` Lỗi upsertLop: ${e.message} - ${JSON.stringify(r)}`);
     }
   }
-  writeLog(`📘 Lop: ${rows.length} bản ghi đã lưu`);
+  writeLog(` Lop: ${rows.length} bản ghi đã lưu`);
 }
 
 async function upsertSinhVien(rows = []) {
@@ -130,10 +130,10 @@ phai = EXCLUDED.phai,
         now,
       ]);
     } catch (e) {
-      writeLog(`⚠️ Lỗi upsertSinhVien: ${e.message} - ${JSON.stringify(r)}`);
+      writeLog(`Lỗi upsertSinhVien: ${e.message} - ${JSON.stringify(r)}`);
     }
   }
-  writeLog(`🎓 SinhVien: ${rows.length} bản ghi đã lưu`);
+  writeLog(`SinhVien: ${rows.length} bản ghi đã lưu`);
 }
 
 async function upsertDangKy(rows = []) {
@@ -160,30 +160,62 @@ async function upsertDangKy(rows = []) {
         now,
       ]);
     } catch (e) {
-      writeLog(`⚠️ Lỗi upsertDangKy: ${e.message} - ${JSON.stringify(r)}`);
+      writeLog(` Lỗi upsertDangKy: ${e.message} - ${JSON.stringify(r)}`);
     }
   }
-  writeLog(`📑 DangKy: ${rows.length} bản ghi đã lưu`);
+  writeLog(` DangKy: ${rows.length} bản ghi đã lưu`);
 }
 
 // ------------------ API ------------------
-
-// ✅ Nhận dữ liệu từ Site1 (.NET)
 app.post("/api/khoa_nn", async (req, res) => {
   try {
     const data = req.body || {};
+
+    // ========== 🧹 BƯỚC MỚI: XÓA DỮ LIỆU CŨ KHÔNG CÒN ==========
+    if (Array.isArray(data.lop) && data.lop.length > 0) {
+      const ids = data.lop.map(r => r.malop);
+      await pool.query(
+        `DELETE FROM lop WHERE malop NOT IN (${ids.map((_, i) => `$${i + 1}`).join(",")})`,
+        ids
+      );
+    }
+
+    if (Array.isArray(data.sinhvien) && data.sinhvien.length > 0) {
+      const ids = data.sinhvien.map(r => r.masv);
+      await pool.query(
+        `DELETE FROM sinhvien WHERE masv NOT IN (${ids.map((_, i) => `$${i + 1}`).join(",")})`,
+        ids
+      );
+    }
+
+    if (Array.isArray(data.dangky) && data.dangky.length > 0) {
+      const pairs = data.dangky.map(r => `${r.masv}_${r.mamon}`);
+      const allPairs = (await pool.query(`SELECT masv, mamon FROM dangky`)).rows;
+      for (const old of allPairs) {
+        const key = `${old.masv}_${old.mamon}`;
+        if (!pairs.includes(key)) {
+          await pool.query(`DELETE FROM dangky WHERE masv = $1 AND mamon = $2`, [
+            old.masv,
+            old.mamon,
+          ]);
+        }
+      }
+    }
+
+    // ========== CẬP NHẬT (UPSERT) NHƯ CŨ ==========
     await upsertLop(data.lop);
     await upsertSinhVien(data.sinhvien);
-    await upsertDangKy(data.dangky);
-    writeLog("✅ Site3 nhận & lưu dữ liệu từ Site1");
-    res.json({ ok: true, message: "✅ Nhận dữ liệu thành công!" });
+await upsertDangKy(data.dangky);
+
+    writeLog("✅ Site3 đã đồng bộ (thêm/sửa/xóa) dữ liệu từ Site1");
+    res.json({ ok: true, message: "Đồng bộ đầy đủ thành công!" });
   } catch (err) {
-    writeLog("❌ Lỗi nhận dữ liệu từ Site1: " + err.message);
+    writeLog("❌ Lỗi đồng bộ dữ liệu từ Site1: " + err.message);
     res.status(500).json({ ok: false, message: err.message });
   }
 });
 
-// ✅ Xem toàn bộ dữ liệu tại Site3
+//  Xem toàn bộ dữ liệu tại Site3
 app.get("/api/khoa_nn", async (req, res) => {
   try {
     const lop = (await pool.query(`SELECT * FROM lop ORDER BY malop`)).rows;
@@ -199,4 +231,4 @@ app.get("/api/khoa_nn", async (req, res) => {
 });
 
 // ------------------ START SERVER ------------------
-app.listen(PORT, () => writeLog(`🚀 Site3 running at port ${PORT}`));
+app.listen(PORT, () => writeLog(` Site3 running at port ${PORT}`));
