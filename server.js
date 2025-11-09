@@ -58,9 +58,9 @@ async function initTables() {
       );
     `);
 
-    writeLog(" PostgreSQL tables ready.");
+    writeLog("PostgreSQL tables ready.");
   } catch (err) {
-    writeLog(" Init tables error: " + err.message);
+    writeLog("Init tables error: " + err.message);
   }
 }
 initTables();
@@ -94,10 +94,10 @@ async function upsertLop(rows = []) {
         (r.khoa || "NN").trim(),
       ]);
     } catch (e) {
-      writeLog(` Lỗi upsertLop: ${e.message} - ${JSON.stringify(r)}`);
+      writeLog(`Error upsertLop: ${e.message} - ${JSON.stringify(r)}`);
     }
   }
-  writeLog(` Lop: ${rows.length} bản ghi đã lưu`);
+  writeLog(`Lop: ${rows.length} records upserted`);
 }
 
 async function upsertSinhVien(rows = []) {
@@ -107,9 +107,9 @@ async function upsertSinhVien(rows = []) {
     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
     ON CONFLICT (masv) DO UPDATE SET
       hoten = EXCLUDED.hoten,
-phai = EXCLUDED.phai,
+      phai = EXCLUDED.phai,
       ngaysinh = EXCLUDED.ngaysinh,
-      malop = EXCLUDED.malop,
+malop = EXCLUDED.malop,
       hocbong = EXCLUDED.hocbong,
       khoa = EXCLUDED.khoa,
       lastmodified = EXCLUDED.lastmodified;
@@ -130,10 +130,10 @@ phai = EXCLUDED.phai,
         now,
       ]);
     } catch (e) {
-      writeLog(`Lỗi upsertSinhVien: ${e.message} - ${JSON.stringify(r)}`);
+      writeLog(`Error upsertSinhVien: ${e.message} - ${JSON.stringify(r)}`);
     }
   }
-  writeLog(`SinhVien: ${rows.length} bản ghi đã lưu`);
+  writeLog(`SinhVien: ${rows.length} records upserted`);
 }
 
 async function upsertDangKy(rows = []) {
@@ -160,10 +160,10 @@ async function upsertDangKy(rows = []) {
         now,
       ]);
     } catch (e) {
-      writeLog(` Lỗi upsertDangKy: ${e.message} - ${JSON.stringify(r)}`);
+      writeLog(`Error upsertDangKy: ${e.message} - ${JSON.stringify(r)}`);
     }
   }
-  writeLog(` DangKy: ${rows.length} bản ghi đã lưu`);
+  writeLog(`DangKy: ${rows.length} records upserted`);
 }
 
 // ------------------ API ------------------
@@ -171,7 +171,7 @@ app.post("/api/khoa_nn", async (req, res) => {
   try {
     const data = req.body || {};
 
-    // ========== 🧹 BƯỚC MỚI: XÓA DỮ LIỆU CŨ KHÔNG CÒN ==========
+    // ---------- DELETE OLD DATA ----------
     if (Array.isArray(data.lop) && data.lop.length > 0) {
       const ids = data.lop.map(r => r.malop);
       await pool.query(
@@ -202,28 +202,25 @@ app.post("/api/khoa_nn", async (req, res) => {
       }
     }
 
-    // ========== CẬP NHẬT (UPSERT) NHƯ CŨ ==========
+    // ---------- UPSERT DATA ----------
     await upsertLop(data.lop);
     await upsertSinhVien(data.sinhvien);
-await upsertDangKy(data.dangky);
+    await upsertDangKy(data.dangky);
 
-    writeLog("✅ Site3 đã đồng bộ (thêm/sửa/xóa) dữ liệu từ Site1");
-    res.json({ ok: true, message: "Đồng bộ đầy đủ thành công!" });
+    writeLog("Site3 synchronized data from Site1 successfully");
+res.json({ ok: true, message: "Đồng bộ thành công" });
   } catch (err) {
-    writeLog("❌ Lỗi đồng bộ dữ liệu từ Site1: " + err.message);
+    writeLog("Error synchronizing data: " + err.message);
     res.status(500).json({ ok: false, message: err.message });
   }
 });
 
-//  Xem toàn bộ dữ liệu tại Site3
+// ---------- GET ALL DATA ----------
 app.get("/api/khoa_nn", async (req, res) => {
   try {
     const lop = (await pool.query(`SELECT * FROM lop ORDER BY malop`)).rows;
-    const sinhvien = (await pool.query(`SELECT * FROM sinhvien ORDER BY masv`))
-      .rows;
-    const dangky = (
-      await pool.query(`SELECT * FROM dangky ORDER BY masv, mamon`)
-    ).rows;
+    const sinhvien = (await pool.query(`SELECT * FROM sinhvien ORDER BY masv`)).rows;
+    const dangky = (await pool.query(`SELECT * FROM dangky ORDER BY masv, mamon`)).rows;
     res.json({ lop, sinhvien, dangky });
   } catch (err) {
     res.status(500).json({ ok: false, message: err.message });
@@ -231,4 +228,4 @@ app.get("/api/khoa_nn", async (req, res) => {
 });
 
 // ------------------ START SERVER ------------------
-app.listen(PORT, () => writeLog(` Site3 running at port ${PORT}`));
+app.listen(PORT, () => writeLog(`Site3 running at port ${PORT}`));
