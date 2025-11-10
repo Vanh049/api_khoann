@@ -35,7 +35,7 @@ async function initTables() {
         hoten VARCHAR(200) NOT NULL,
         phai SMALLINT,
         ngaysinh DATE,
-        malop VARCHAR(10),
+        malop VARCHAR(10) REFERENCES lop(malop) ON DELETE RESTRICT,
         hocbong FLOAT,
         khoa VARCHAR(10),
         lastmodified BIGINT,
@@ -45,7 +45,7 @@ async function initTables() {
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS dangky (
-        masv VARCHAR(10),
+        masv VARCHAR(10) REFERENCES sinhvien(masv) ON DELETE RESTRICT,
         mamon VARCHAR(10),
         diem1 FLOAT,
         diem2 FLOAT,
@@ -55,9 +55,9 @@ async function initTables() {
       );
     `);
 
-    writeLog("PostgreSQL tables ready.");
+    writeLog("✅ PostgreSQL tables ready (with constraints).");
   } catch (err) {
-    writeLog("Init tables error: " + err.message);
+    writeLog("❌ Init tables error: " + err.message);
   }
 }
 initTables();
@@ -76,7 +76,9 @@ async function upsertLop(rows = []) {
   const query = `
     INSERT INTO lop (malop, tenlop, khoa)
     VALUES ($1, $2, $3)
-    ON CONFLICT (malop) DO NOTHING;
+    ON CONFLICT (malop) DO UPDATE SET
+      tenlop = EXCLUDED.tenlop,
+      khoa = EXCLUDED.khoa;
   `;
   for (const item of rows) {
     const r = normalizeKeys(item);
@@ -87,10 +89,10 @@ async function upsertLop(rows = []) {
         (r.khoa || "NN").trim(),
       ]);
     } catch (e) {
-      writeLog(`Error upsertLop: ${e.message} - ${JSON.stringify(r)}`);
+      writeLog(`❌ Error upsertLop: ${e.message} - ${JSON.stringify(r)}`);
     }
   }
-  writeLog(`Lop: ${rows.length} records upserted`);
+  writeLog(`✅ Lop: ${rows.length} records upserted`);
 }
 
 async function upsertSinhVien(rows = []) {
@@ -105,7 +107,7 @@ async function upsertSinhVien(rows = []) {
       malop = EXCLUDED.malop,
       hocbong = EXCLUDED.hocbong,
       khoa = EXCLUDED.khoa,
-      lastmodified = EXCLUDED.lastmodified;
+lastmodified = EXCLUDED.lastmodified;
   `;
   const now = Date.now();
   for (const item of rows) {
@@ -113,7 +115,7 @@ async function upsertSinhVien(rows = []) {
     try {
       const phaiVal = r.phai === true || r.phai === 1 ? 1 : 0;
       await pool.query(query, [
-r.masv?.trim(),
+        r.masv?.trim(),
         r.hoten?.trim(),
         phaiVal,
         r.ngaysinh || null,
@@ -123,10 +125,10 @@ r.masv?.trim(),
         now,
       ]);
     } catch (e) {
-      writeLog(`Error upsertSinhVien: ${e.message} - ${JSON.stringify(r)}`);
+      writeLog(`❌ Error upsertSinhVien: ${e.message} - ${JSON.stringify(r)}`);
     }
   }
-  writeLog(`SinhVien: ${rows.length} records upserted`);
+  writeLog(`✅ SinhVien: ${rows.length} records upserted`);
 }
 
 async function upsertDangKy(rows = []) {
@@ -153,71 +155,83 @@ async function upsertDangKy(rows = []) {
         now,
       ]);
     } catch (e) {
-      writeLog(`Error upsertDangKy: ${e.message} - ${JSON.stringify(r)}`);
+      writeLog(`❌ Error upsertDangKy: ${e.message} - ${JSON.stringify(r)}`);
     }
   }
-  writeLog(`DangKy: ${rows.length} records upserted`);
+  writeLog(`✅ DangKy: ${rows.length} records upserted`);
 }
 
+// ========== API Routes ==========
+
+// Thêm / cập nhật đồng bộ
 app.post("/api/khoa_nn", async (req, res) => {
   try {
     const data = req.body || {};
     await upsertLop(data.lop);
     await upsertSinhVien(data.sinhvien);
     await upsertDangKy(data.dangky);
-    writeLog("Site3 synchronized data from Site1 successfully");
+    writeLog("✅ Synchronized data from Site1 successfully");
     res.json({ ok: true, message: "Đồng bộ thành công" });
   } catch (err) {
-    writeLog("Error synchronizing data: " + err.message);
+    writeLog("❌ Error synchronizing data: " + err.message);
     res.status(500).json({ ok: false, message: err.message });
   }
 });
 
+// Xóa lớp — chỉ khi không còn sinh viên
 app.delete("/api/khoa_nn/lop/:malop", async (req, res) => {
   try {
     const { malop } = req.params;
-    await pool.query("DELETE FROM lop WHERE malop = $1", [malop]);
-    writeLog(`Deleted Lop: ${malop}`);
+    const svCount = (await pool.query("SELECT COUNT(*) FROM sinhvien WHERE malop=$1", [malop])).rows[0].count;
+    if (parseInt(svCount) > 0) {
+      return res.status(400).json({ ok: false, message: "Không thể xóa lớp còn sinh viên." });
+    }
+    await pool.query("DELETE FROM lop WHERE malop=$1", [malop]);
+    writeLog(`🗑️ Deleted Lop: ${malop}`);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ ok: false, message: err.message });
   }
 });
 
+// Xóa sinh viên — chỉ khi không còn đăng ký
 app.delete("/api/khoa_nn/sinhvien/:masv", async (req, res) => {
   try {
     const { masv } = req.params;
-    await pool.query("DELETE FROM sinhvien WHERE masv = $1", [masv]);
-    writeLog(`Deleted SinhVien: ${masv}`);
+    const dkCount = (await pool.query("SELECT COUNT(*) FROM dangky WHERE masv=$1", [masv])).rows[0].count;
+    if (parseInt(dkCount) > 0) {
+return res.status(400).json({ ok: false, message: "Không thể xóa sinh viên còn đăng ký học phần." });
+    }
+    await pool.query("DELETE FROM sinhvien WHERE masv=$1", [masv]);
+    writeLog(`🗑️ Deleted SinhVien: ${masv}`);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ ok: false, message: err.message });
   }
 });
 
+// Xóa đăng ký — luôn được phép
 app.delete("/api/khoa_nn/dangky/:masv/:mamon", async (req, res) => {
   try {
     const { masv, mamon } = req.params;
-    await pool.query("DELETE FROM dangky WHERE masv = $1 AND mamon = $2", [
-      masv,
-      mamon,
-    ]);
-    writeLog(`Deleted DangKy: ${masv} - ${mamon}`);
+    await pool.query("DELETE FROM dangky WHERE masv=$1 AND mamon=$2", [masv, mamon]);
+    writeLog(`🗑️ Deleted DangKy: ${masv}-${mamon}`);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ ok: false, message: err.message });
   }
 });
 
+// Lấy toàn bộ dữ liệu
 app.get("/api/khoa_nn", async (req, res) => {
   try {
     const lop = (await pool.query(`SELECT * FROM lop ORDER BY malop`)).rows;
     const sinhvien = (await pool.query(`SELECT * FROM sinhvien ORDER BY masv`)).rows;
-const dangky = (await pool.query(`SELECT * FROM dangky ORDER BY masv, mamon`)).rows;
+    const dangky = (await pool.query(`SELECT * FROM dangky ORDER BY masv, mamon`)).rows;
     res.json({ lop, sinhvien, dangky });
   } catch (err) {
     res.status(500).json({ ok: false, message: err.message });
   }
 });
 
-app.listen(PORT, () => writeLog(`Site3 running at port ${PORT}`));
+app.listen(PORT, () => writeLog(`🚀 Site3 running at port ${PORT}`));
